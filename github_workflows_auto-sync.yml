@@ -1,0 +1,139 @@
+name: Auto-Sync Local Directory
+
+on:
+  workflow_dispatch:
+    inputs:
+      directory:
+        description: 'Directory to sync'
+        required: true
+        default: 'E:\kracknai'
+      message:
+        description: 'Commit message'
+        required: false
+        default: 'Auto-sync update'
+
+jobs:
+  sync:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install gitpython PyGithub watchdog
+          
+      - name: Create sync script
+        run: |
+          $script = @"
+          import os
+          import sys
+          import time
+          import logging
+          from pathlib import Path
+          import git
+          from github import Github
+          
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger("GitHubSync")
+          
+          def sync_directory(local_dir, repo_path, commit_message):
+              token = os.environ.get('GITHUB_TOKEN')
+              if not token:
+                  logger.error("GITHUB_TOKEN not found in environment")
+                  sys.exit(1)
+                  
+              local_dir = Path(local_dir)
+              if not local_dir.exists():
+                  logger.error(f"Local directory does not exist: {local_dir}")
+                  sys.exit(1)
+                  
+              # Initialize GitHub API
+              g = Github(token)
+              repo = g.get_repo(repo_path)
+              logger.info(f"Connected to repository: {repo.full_name}")
+              
+              # Set up git repo
+              try:
+                  git_repo = git.Repo('.')
+              except git.InvalidGitRepositoryError:
+                  logger.error("Current directory is not a git repository")
+                  sys.exit(1)
+              
+              # Copy files from local directory to repository
+              import shutil
+              import tempfile
+              
+              # Exclude .git directory and other unnecessary files
+              def ignore_patterns(path, names):
+                  return [n for n in names if n == '.git' or n.startswith('.git')]
+              
+              # Clean repo directory first (except .git)
+              for item in os.listdir('.'):
+                  if item != '.git':
+                      path = Path(item)
+                      if path.is_dir():
+                          shutil.rmtree(path, ignore_errors=True)
+                      else:
+                          path.unlink(missing_ok=True)
+              
+              # Copy everything from local dir to repo dir
+              for item in os.listdir(local_dir):
+                  src = local_dir / item
+                  dst = Path('.') / item
+                  if src.is_dir():
+                      shutil.copytree(src, dst, ignore=ignore_patterns, dirs_exist_ok=True)
+                  else:
+                      shutil.copy2(src, dst)
+              
+              logger.info("Files copied successfully")
+              
+              # Check for changes
+              has_changes = len(git_repo.index.diff(None)) > 0 or len(git_repo.untracked_files) > 0
+              
+              if not has_changes:
+                  logger.info("No changes detected")
+                  return False
+                  
+              # Stage all changes
+              git_repo.git.add('.')
+              
+              # Commit changes
+              git_repo.git.config('user.name', 'GitHub Action')
+              git_repo.git.config('user.email', 'action@github.com')
+              git_repo.git.commit('-m', commit_message)
+              
+              # Push changes
+              git_repo.git.push('origin', git_repo.active_branch.name)
+              
+              logger.info(f"Changes committed and pushed: {commit_message}")
+              return True
+              
+          if __name__ == "__main__":
+              if len(sys.argv) < 4:
+                  print("Usage: python sync_script.py <local_dir> <repo_path> <commit_message>")
+                  sys.exit(1)
+                  
+              local_dir = sys.argv[1]
+              repo_path = sys.argv[2]
+              commit_message = sys.argv[3]
+              
+              sync_directory(local_dir, repo_path, commit_message)
+          "@
+          
+          Set-Content -Path sync_script.py -Value $script
+        shell: pwsh
+        
+      - name: Run sync script
+        run: python sync_script.py "${{ github.event.inputs.directory }}" "${{ github.repository }}" "${{ github.event.inputs.message }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
