@@ -1,0 +1,5 @@
+2025-03-29 20:46:45,943 - GitHubAutoSync - INFO - Configured sync for E:\kracknai -> krackn88/kai:main
+2025-03-29 20:46:45,959 - GitHubAutoSync - INFO - Using existing git repository at E:\kracknai
+2025-03-29 20:46:46,608 - GitHubAutoSync - INFO - Found existing GitHub repository: krackn88/kai
+2025-03-29 20:46:47,037 - GitHubAutoSync - INFO - Checked out existing branch: main
+2025-03-29 20:46:47,037 - GitHubAutoSync - INFO - Performing initial sync...
